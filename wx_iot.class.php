@@ -648,7 +648,7 @@ class class_mysql_db
             die('Could not connect: ' . mysqli_error($mysqli));
         }
         //找到数据库中已有序号最大的，也许会出现序号(6 BYTE)用满的情况，这时应该考虑更新该算法，短期内不需要考虑这么复杂的情况
-        $result = $mysqli->query("SELECT sid FROM `bleboundinfo` WHERE 1");
+        $result = $mysqli->query("SELECT `sid` FROM `bleboundinfo` WHERE 1");
         $sid =1;
         while($row = $result->fetch_array())
         {
@@ -809,8 +809,9 @@ class class_mysql_db
         return $result;
     }
 
-    //存储EMC数据
-    public function db_EmcData_save($time, $user, $deviceid, $value)
+    //存储EMC数据，每一次存储，都是新增一条记录
+    //时间的网格化是以3分钟为单位的，如果后期需要调整该定时，需要更新该函数
+    public function db_EmcDataInfo_save($user, $deviceid, $timestamp, $value, $gps)
     {
         //建立连接
         $mysqli=new mysqli(WX_DBHOST, WX_DBUSER, WX_DBPSW, WX_DBNAME, WX_DBPORT);
@@ -818,11 +819,203 @@ class class_mysql_db
         {
             die('Could not connect: ' . mysqli_error($mysqli));
         }
-        $result=$mysqli->query("INSERT INTO `emcdatainfo` (timeStamp, fromUserName, deviceID, emcValue)
-          VALUES ('$time', '$user', '$deviceid','$value')");
+        //找到数据库中已有序号最大的，也许会出现序号(6 BYTE)用满的情况，这时应该考虑更新该算法，短期内不需要考虑这么复杂的情况
+        $result = $mysqli->query("SELECT `sid` FROM `emcdatainfo` WHERE 1");
+        $sid =0;
+        while($row = $result->fetch_array())
+        {
+            if ($row['sid'] > $sid)
+            {
+                $sid = $row['sid'];
+            }
+        }
+        $sid = $sid+1;
+        //存储新记录，如果发现是已经存在的数据，则覆盖，否则新增
+        $date1 = intval(date("ymd", $timestamp));
+        $tmp = getdate($timestamp);
+        $hourminindex = intval(($tmp["hours"] * 60 + $tmp["minutes"])/3);  //固定三分钟为一个周期
+        $result = $mysqli->query("SELECT `sid` FROM `emcdatainfo` WHERE ((`wxuser` = '$user' AND `deviceid` =
+          '$deviceid') AND (`date` = '$date1' AND `hourminindex` = '$hourminindex'))");
+        if (($result->num_rows)>0)   //重复，则覆盖
+        {
+            $res1=$mysqli->query("UPDATE `emcdatainfo` SET `emcvalue` = '$value'
+              WHERE ((`wxuser` = '$user' AND `deviceid` = '$deviceid') AND (`date` = '$date1' AND `hourminindex` = '$hourminindex'))");
+            $res2=$mysqli->query("UPDATE `emcdatainfo` SET `gps` = '$gps'
+              WHERE ((`wxuser` = '$user' AND `deviceid` = '$deviceid') AND (`date` = '$date1' AND `hourminindex` = '$hourminindex'))");
+            $result = $res1 OR $res2;
+        }
+        else   //不存在，新增
+        {
+            $result=$mysqli->query("INSERT INTO `emcdatainfo` (sid, wxuser, deviceid, date, hourminindex, emcvalue, gps)
+          VALUES ('$sid', '$user', '$deviceid', '$date1', '$hourminindex','$value', '$gps')");
+        }
         $mysqli->close();
         return $result;
     }
+
+    //删除对应用户所有超过90天的数据
+    //缺省做成90天，如果参数错误，导致90天以内的数据强行删除，则不被认可
+    public function db_EmcDataInfo_delete_3monold($user, $deviceid, $days)
+    {
+        if ($days <90) $days = 90;  //不允许删除90天以内的数据
+        //建立连接
+        $mysqli=new mysqli(WX_DBHOST, WX_DBUSER, WX_DBPSW, WX_DBNAME, WX_DBPORT);
+        if (!$mysqli)
+        {
+            die('Could not connect: ' . mysqli_error($mysqli));
+        }
+        //删除距离当前超过90天的数据，数据的第90天稍微有点截断，但问题不大
+        //比较蠢的细节方法
+        /*$result = $mysqli->query("SELECT `sid` FROM `emcdatainfo` WHERE `date` < (now()-$days)");
+        while($row = $result->fetch_array())
+        {
+            $sidtmp = $row['sid'];
+            $res = $mysqli->query("DELETE FROM `emcdatainfo` WHERE `sid` = '$sidtmp'");
+        }*/
+        //尝试使用一次性删除技巧，结果非常好!!!
+        $result = $mysqli->query("DELETE FROM `emcdatainfo` WHERE ((`wxuser` = '$user' AND `deviceid` =
+          '$deviceid') AND (TO_DAYS(NOW()) - TO_DAYS(`date`) > '$days'))");
+        $mysqli->close();
+        return $result;
+    }
+
+    //新增或者更新累计辐射剂量数据，每个用户一条记录，不得重复
+    public function db_EmcAccumulationInfo_save($user, $deviceid)
+    {
+        //建立连接
+        $mysqli = new mysqli(WX_DBHOST, WX_DBUSER, WX_DBPSW, WX_DBNAME, WX_DBPORT);
+        if (!$mysqli) {
+            die('Could not connect: ' . mysqli_error($mysqli));
+        }
+        $result = $mysqli->query("SELECT * FROM `emcaccumulationinfo` WHERE (`wxuser` = '$user' AND `deviceid` =
+          '$deviceid')");
+        $tag = 0;
+        if (($result->num_rows)>0)   //更新数据而已，而且假设每个用户只有唯一的一条记录
+        {
+            $row = $result->fetch_array();
+            $lastupdatedate = date("ymd", strtotime($row['lastupdatedate']));  //字符串
+            $lastUpdateStart = date("ymd", strtotime($row['lastupdatedate'])-2*24*60*60);  //解决模2的边界问题
+            if ($lastupdatedate != date("ymd")) {
+                $tag = 1;
+                $sid = $row['sid'];
+                $lastUpdateStart = intval($lastUpdateStart);
+            }
+        }else  //如果是第一次创建
+        {
+            //先找到最大的SID系列号
+            $res1 = $mysqli->query("SELECT `sid` FROM `emcaccumulationinfo` WHERE 1");
+            $sid = 0;
+            while ($row = $res1->fetch_array()) {
+                if ($row['sid'] > $sid) {
+                    $sid = $row['sid'];
+                }
+            }
+            $sid = $sid + 1;
+            //初始化各种数值
+            $lastupdatedate = intval(date("ymd"));
+            $avg30days = "0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0";  //使用;做数据之间的分割
+            $avg3month = "0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0";
+            $result = $mysqli->query("INSERT INTO `emcaccumulationinfo` (sid, wxuser, deviceid, lastupdatedate, avg30days, avg3month)
+          VALUES ('$sid', '$user', '$deviceid', '$lastupdatedate', '$avg30days', '$avg3month')");
+            $tag = 2;
+        }
+        if ($tag ==1 || $tag ==2)  //不同天的更新，或者新创时的全面计算
+        {
+            //从数据库中取出，进行处理
+            $result = $mysqli->query("SELECT * FROM `emcaccumulationinfo` WHERE (`sid` = '$sid')");
+            $row = $result->fetch_array();  //原则上只有唯一的一个记录
+            $avg30days = $row['avg30days'];
+            $avg3month = $row['avg3month'];
+            $avgd1 = explode(";", $avg30days);
+            $avgm1 = explode(";", $avg3month);
+            for ($i=0;$i<32;$i++)
+            {
+                $avgd2 [$i] = intval($avgd1[$i]);
+                $avgm2 [$i] = intval($avgm1[$i]);
+                $daynum [$i] = 0;
+                $monthnum [$i] = 0;
+            }
+            //全面做一次计算处理，先做当月的处理
+            $day0 = intval(date("ymd"));
+            if ($tag == 1) $day90 = $lastUpdateStart;  //两天的边界问题需要考虑在内
+            if ($tag == 2) $day90 = intval(date("ymd", time()-90*24*60*60));
+
+            $result = $mysqli->query("SELECT * FROM `emcdatainfo` WHERE (`wxuser` = '$user' AND `deviceid` = '$deviceid')");
+            while($row = $result->fetch_array())
+            {
+                $getdate0 = date("ymd", strtotime($row['date']));
+                $getdate = intval($getdate0);
+                if (($getdate <= $day0) &&  ($getdate >= $day90))
+                {
+                    $tm = intval(substr($getdate0,2,2));
+                    $td = intval(substr($getdate0,4,2));
+                    $index1 = $tm*31 + $td;
+                    $index = intval(($index1 - intval($index1/90)*90)/3);
+                    $value = intval($row['emcvalue']);
+                    //日加总
+                    if ($daynum[$td] == 0){
+                        $avgd2[$td] = $value;
+                    }else{
+                        $avgd2[$td] = $avgd2[$td] + $value;
+                    }
+                    $daynum[$td] = $daynum[$td] + 1;
+                    //季加总平均
+                    if ($monthnum[$index] == 0){
+                        $avgm2[$index] = $value;
+                    }else{
+                        $avgm2[$index] = $avgm2[$index] + $value;
+                    }
+                    $monthnum[$index] = $monthnum[$index] + 1;
+                }
+            }
+            for ($i=0;$i<32;$i++)
+            {
+                if ($daynum[$i] != 0)
+                $avgd2 [$i] = intval($avgd2[$i] / $daynum[$i]);
+                if ($monthnum[$i] != 0)
+                    $avgm2 [$i] = intval($avgm2[$i] / $monthnum[$i]);
+            }
+            $avg30days = implode(";", $avgd2);
+            $avg3month = implode(";", $avgm2);
+            //再重新存入数据文件
+            $res1=$mysqli->query("UPDATE `emcaccumulationinfo` SET `avg30days` = '$avg30days' WHERE (`sid` = '$sid')");
+            $res2=$mysqli->query("UPDATE `emcaccumulationinfo` SET `avg3month` = '$avg3month' WHERE (`sid` = '$sid')");
+            $res3=$mysqli->query("UPDATE `emcaccumulationinfo` SET `lastupdatedate` = '$day0' WHERE (`sid` = '$sid')");
+
+            $result = $res1 OR $res2 OR $res3;
+        }
+        $mysqli->close();
+        return $result;
+    }
+
+
+    //新增或者更新累计辐射剂量数据，每个用户一条记录，不得重复
+    //返回双结构数据：数组的第一个包含了31天的平均值，30个采样点，第二个包含了90天的平均值（每三天平均一次），30个点的采样数据
+    //数组是32个元素，DAY数据在1-31中，90天的均值数在0-29中
+    //这样设计只是为了处理的方便，上层使用时自行处理边界问题
+    public function db_EmcAccumulationInfo_inqury($user, $deviceid)
+    {
+        //建立连接
+        $mysqli = new mysqli(WX_DBHOST, WX_DBUSER, WX_DBPSW, WX_DBNAME, WX_DBPORT);
+        if (!$mysqli) {
+            die('Could not connect: ' . mysqli_error($mysqli));
+        }
+        $result = $mysqli->query("SELECT * FROM `emcaccumulationinfo` WHERE (`wxuser` = '$user' AND `deviceid` = '$deviceid')");
+        $row = $result->fetch_array();
+        $avgd = $row['avg30days'];
+        $avgm = $row['avg3month'];
+        $avgd1 = explode(";", $avgd);
+        $avgm1 = explode(";", $avgm);
+        for ($i=0;$i<32;$i++)
+        {
+            $avgd2 [$i] = intval($avgd1[$i]);
+            $avgm2 [$i] = intval($avgm1[$i]);
+        }
+        $result = array ("avg30days" => $avgd2,  "avg3month" => $avgm2);
+        $mysqli->close();
+        return $result;
+    }
+
 
 } //End of class_mysql_db
 
@@ -921,7 +1114,9 @@ class class_L3_Process_Func
                 $emc_time = hexdec(substr($rev["body"], 0, 4))  & 0xFFFF;
                 //存入数据库中
                 $wxDbObj = new class_mysql_db();
-                $wxDbObj->db_EmcData_save($emc_time, $fromuser, $deviceid, $emc_value);
+                $wxDbObj->db_EmcDataInfo_save($fromuser, $deviceid, $emc_time, $emc_value, 0); //GPS not yet exist today, could be add in future.
+                $wxDbObj->db_EmcDataInfo_delete_3monold($fromuser, $deviceid, 90);  //remove 90 days old data.
+                $wxDbObj->db_EmcAccumulationInfo_save($fromuser, $deviceid); //累计值计算，如果不是初次接收数据，而且日期没有改变，则该过程将非常快
                 $cmdid = CMDID_EMC_DATA_RESP;
                 $resp = "";
                 break;

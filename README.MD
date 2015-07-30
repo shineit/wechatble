@@ -31,6 +31,7 @@ Make By：ZJL
 17. tool.dev.bind.php，后台强制绑定用户
 18. tool.pageshare.php，测试页面共享以及JSSDK功能
 19. wx_jssdk.php，JSSDK类封装
+20. tool.ajxhisdata.php 用于被tool.pageshare.php调用的后台历史数据访问php程序
 
 
 ###SAE运行或部署步骤：
