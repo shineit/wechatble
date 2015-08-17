@@ -32,7 +32,7 @@ define("WX_LOGCALLBACK", false);
 //
 if ($_SERVER['SERVER_NAME'] == "smdzjl.sinaapp.com") //smdzjl.sinaapp.com 服务器数据库配置信息
 {
-    define("WX_DBHOST", 128.199.76.91);    //连接的服务器地址 w.rdc.sae.sina.com.cn
+    define("WX_DBHOST", "128.199.76.91");    //连接的服务器地址 w.rdc.sae.sina.com.cn
     define("WX_DBUSER","root");     //连接数据库的用户名
     define("WX_DBPSW", "");        //连接数据库的密码
     define("WX_DBNAME","app_smdzjl");         //连接的数据库名称 app_smdzjl
