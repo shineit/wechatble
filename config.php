@@ -10,9 +10,16 @@
 define("WX_TOKEN", "weixin");  //TOKEN，必须和微信绑定的URL使用的TOKEN一致
 //smdzjl@sina.com  wx32f73ab219f56efb
 //714846578@qq.com wxb53c6e72971723ad
-define("WX_APPID", "wx32f73ab219f56efb");  //
-define("WX_ENCODINGAESKEY", "7Tp1NIUzUa0JBezeJUjG8O61Kdjcu2ce6BQVukZlv3u");   //填写加密用的EncodingAESKey，如接口为明文模式可忽略
-define("WX_APPSECRET", "eca20c2a26a5ec5b64a89d15ba92a781");  //填写高级调用功能的app id, 请在微信开发模式后台查询
+
+/*
+ * on branch ql
+ * 微信号： gh_2ae9c97585c5
+ * 测试号信息appID，wx39422daf6dd4b2ba
+ * appsecret，c5f35fb2d6c47cc53df4c22ecd25369e
+ */
+define("WX_APPID", "wx39422daf6dd4b2ba");  //
+define("WX_ENCODINGAESKEY", "");   //填写加密用的EncodingAESKey，如接口为明文模式可忽略
+define("WX_APPSECRET", "c5f35fb2d6c47cc53df4c22ecd25369e");  //填写高级调用功能的app id, 请在微信开发模式后台查询
 define("WX_DEBUG", false);
 define("WX_LOGCALLBACK", false);
 
@@ -25,12 +32,12 @@ define("WX_LOGCALLBACK", false);
 //
 if ($_SERVER['SERVER_NAME'] == "smdzjl.sinaapp.com") //smdzjl.sinaapp.com 服务器数据库配置信息
 {
-    define("WX_DBHOST", SAE_MYSQL_HOST_M);    //连接的服务器地址 w.rdc.sae.sina.com.cn
-    define("WX_DBUSER",SAE_MYSQL_USER);     //连接数据库的用户名
-    define("WX_DBPSW", SAE_MYSQL_PASS);        //连接数据库的密码
+    define("WX_DBHOST", 128.199.76.91);    //连接的服务器地址 w.rdc.sae.sina.com.cn
+    define("WX_DBUSER","root");     //连接数据库的用户名
+    define("WX_DBPSW", "");        //连接数据库的密码
     define("WX_DBNAME","app_smdzjl");         //连接的数据库名称 app_smdzjl
-    define("WX_DBPORT", SAE_MYSQL_PORT);
-    define("WX_DBHOST_S", SAE_MYSQL_DB);
+    define("WX_DBPORT", 3306);
+    define("WX_DBHOST_S", "");
 }else   //CV0002816N4  本地配置数据库信息
 {
     define("WX_DBHOST", "localhost");    //连接的服务器地址
