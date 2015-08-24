@@ -8,6 +8,7 @@
 
 include_once "config.php";
 
+
 //BXXH硬件设备级 Layer 2.2 SDK02，用户设备级接入到微信系统中
 class class_wx_IOT_sdk
 {
@@ -130,15 +131,18 @@ class class_wx_IOT_sdk
     //发送客服消息，已实现发送文本，其他类型可扩展
     public function send_custom_message($touser, $type, $data)
     {
-        $msg = array('touser' => $touser);
+        $msg ['touser'] = $touser;
         switch ($type) {
             case 'text':
                 $msg['msgtype'] = 'text';
-                $msg['text'] = array('content' => urlencode($data));
+                //$msg['text'] = array('content' => urlencode($data));
+                $msg['text'] = array('content' => $data);
                 break;
         }
+        $msg = json_encode($msg);
         $url = "https://api.weixin.qq.com/cgi-bin/message/custom/send?access_token=" . $this->access_token;
-        return $this->https_request($url, urldecode(json_encode($msg)));
+        $res = $this->https_request($url, $msg);
+        return json_decode($res, true);
     }
 
     //生成参数二维码
@@ -216,45 +220,68 @@ class class_wx_IOT_sdk
         //经过simplexml_load_string($postStr, 'SimpleXMLElement', LIBXML_NOCDATA)之后，数据已经可以使用指针操作
         //一个关键点是，LIBXML_NOCDATA这个选项是否合适
 
+        $content = unpack('H*',$data->Content);
+        $strContent = strtoupper($content["1"]); //转换成16进制格式的字符串
+
         switch ($msgType)
         {
             case "device_text":
                 //先推送接受到的设备消息给客服/测试人员的微信界面上
                 //已经BASE64解码后的数据
                 //给硬件设备发送回复消息，直接使用客服接口给微信界面
-                $content = base64_decode($data->Content);
-                $transMsg = "收到设备消息DEVICE_TEXT是： " . $content;
-                $this->send_custom_message($data->OpenID, 'text', $transMsg);  //使用API-CURL推送客服微信用户
+                //$content = base64_decode($data->Content);
+
+                $wxDbObj = new class_mysql_db();
+                $wx_trace = $wxDbObj->db_LogSwitchInfo_inqury($data->FromUserName);
+
+                if ($wx_trace == 1)
+                {
+                    $transMsg = "DEVICE_TEXT= " . $strContent;
+                    $this->send_custom_message(trim($data->OpenID), 'text', $transMsg);  //使用API-CURL推送客服微信用户
+                }
                 //发送到L3的比特流还需要被反系列化
                 $wxL3Obj = new class_L3_Process_Func();
-                $rev = $wxL3Obj->L3_deviceMsgProcess("device_text", $content, $data->FromUserName, $data->DeviceID);
+                $rev = $wxL3Obj->L3_deviceMsgProcess("device_text", $strContent, $data->FromUserName, $data->DeviceID);
                 // BASE64编码后，再发送给设备，使用ECHO-XML方式推送微信用户
-                $tmp = base64_encode($rev);
-                $transMsg = $this->xms_responseDeviceText($data->FromUserName, $data->ToUserName, $data->DeviceType, $data->DeviceID, $data->SessionID, $tmp);
+                //$tmp = base64_encode($rev);
+               // $transMsg = $this->xms_responseDeviceText($data->FromUserName, $data->ToUserName, $data->DeviceType, $data->DeviceID, $data->SessionID, $tmp);
                 break;
             case "device_event":
                 if (($data->Event == "bind") or ($data->Event == "unbind"))
                 {
                     //a) 先推送信息给客户/测试人员的微信界面，但考虑到EVENT中详细的内容都是客户推送结果，故而省略以下推送
-                    $inputContent = base64_decode($data->Content);  //应该是空包，即$content = ''
+                    $wxDbObj = new class_mysql_db();
+                    $wx_trace = $wxDbObj->db_LogSwitchInfo_inqury($data->FromUserName);
+                    if ($wx_trace == 1)
+                    {
+                        $transMsg = "DEVICE_EVENT= " . $data->Event . "; Content =" .$strContent;
+                        $this->send_custom_message(trim($data->OpenID), 'text', $transMsg);  //使用API-CURL推送客服微信用户
+                    }
+
                     //b) 再执行绑定解绑存储，以便下一次查询
-                    if ($data->Event == "bind") {
+                    if ($data->Event == "bind")
+                    {
                         $wxDbObj = new class_mysql_db();
                         //其实，还需要看看是否已经绑定了，否则不应该重新绑定
-                        if ($wxDbObj->db_BleBoundInfo_duplicate($data->FromUserName, $data->DeviceID, $data->OpenID, $data->DeviceType)){
+                        if ($wxDbObj->db_BleBoundInfo_duplicate($data->FromUserName, $data->DeviceID, $data->OpenID, $data->DeviceType))
+                        {
                             $transMsg = "DEVICE_EVENT重复绑定，不处理";
-                        }else{
+                        }
+                        else
+                        {
                             $transMsg = "DEVICE_EVENT初次绑定成功";
                             $wxDbObj->db_BleBoundInfo_save($data->FromUserName, $data->DeviceID, $data->OpenID, $data->DeviceType);
                         }
                     //c) 这里还有个假设：解绑来自于用户的操作，Event/Ubscribe和Event_device/Ubind是分离的
                     //如果解绑逻辑触发跟Unsubscribe是一起的，这个逻辑就要改变
-                    }else{
+                    }
+                    else
+                    {
                         $db_con = new class_mysql_db();
                         $db_con->db_BleBoundInfo_delete($data->FromUserName);
                         $transMsg = "DEVICE_EVENT解绑";
                     }
-                    $this->send_custom_message($data->OpenID, 'text', $transMsg);
+                    $this->send_custom_message(trim($data->OpenID), 'text', $transMsg);
                     //d) 最后执行可能的L3解码，处理后的内容，直接使用echo给微信界面即可
                     //因为是DEVICE_EVENT事件，设备内传输的L3信息应该是空的，反馈给设备的L3依然保留，留下一个悬念
                     //反序化及系列化，TBD
@@ -267,10 +294,12 @@ class class_wx_IOT_sdk
                 else
                 {
                     $transMsg = $this->xms_responseText($data->FromUserName, $data->ToUserName,"收到非法绑操消息");
+                    //$transMsg = "收到非法绑操消息";
                 }
                 break;
             default: //设备级的其它消息体
                 $transMsg = $this->xms_responseText($data->FromUserName, $data->ToUserName,"收到未识别的设备级消息");
+                //$transMsg = "收到未识别的设备级消息";
                 break;
         } //MsgType判定结束
         return $transMsg;
@@ -536,15 +565,19 @@ class class_wx_IOT_sdk
         switch($data->EventKey) {
             case "CLICK_ABOUT":
                 $transMsg = $this->xms_responseText($data->FromUserName, $data->ToUserName, "TokenID = " . $this->access_token);
+                //$transMsg = "TokenID = " . $this->access_token;
                 break;
             case "CLICK_TECH":
                 $transMsg = $this->xms_responseText($data->FromUserName, $data->ToUserName, "Appid = " . $this->appid);
+                //$transMsg = "Appid = " . $this->appid;
                 break;
             case "CLICK_TEST":
                 $transMsg = $this->xms_responseText($data->FromUserName, $data->ToUserName, "Appsecret = " . $this->appsecret);
+                //$transMsg = "Appsecret = " . $this->appsecret;
                 break;
             case "CLICK_BIND":
                 $transMsg = $this->xms_responseText($data->FromUserName, $data->ToUserName, "绑定操作：当前模式下无法完成，请通过后台生成DEVICE_ID和二维码，更新MAC授权后再扫码完成！");
+                //$transMsg = "绑定操作：当前模式下无法完成，请通过后台生成DEVICE_ID和二维码，更新MAC授权后再扫码完成！";
                 break;
             case "CLICK_BIND_INQ":
                 //增加第三方后台云的绑定状态
@@ -556,8 +589,10 @@ class class_wx_IOT_sdk
                 $result = $this->getstat_qrcodebyOpenId($data->FromUserName);
                 if (count($result["device_list"]) == 0)
                     $transMsg = $this->xms_responseText($data->FromUserName, $data->ToUserName, "微信云绑定查询操作结果：无 \n" . $transMsg);
+                    //$transMsg = "微信云绑定查询操作结果：无 \n" . $transMsg;
                 else
-                    $transMsg = $this->xms_responseText($data->FromUserName, $data->ToUserName, "微信云绑定查询操作结果：有 " . $result["device_list"] . " \n" . $transMsg);
+                    $transMsg = $this->xms_responseText($data->FromUserName, $data->ToUserName, "微信云绑定查询操作结果：有 " . json_encode($result["device_list"]) . " \n" . $transMsg);
+                    //$transMsg = "微信云绑定查询操作结果：有 " . $result["device_list"] . " \n" . $transMsg;
                 break;
             case "CLICK_UNBIND";
                 //先解绑微信云上的绑定状态
@@ -574,11 +609,57 @@ class class_wx_IOT_sdk
                 $result = $wxDbObj->db_BleBoundInfo_query($data->FromUserName);
                 if ($result == false) {
                     $transMsg = $this->xms_responseText($data->FromUserName, $data->ToUserName, $transMsg . "第三方云数据库中无绑定设备");
+                    //$transMsg = "第三方云数据库中无绑定设备";
                 } else {
                     $wxDbObj->db_BleBoundInfo_delete($data->FromUserName);
                     $transMsg = $this->xms_responseText($data->FromUserName, $data->ToUserName, $transMsg . "第三方云数据库一次解绑全部");
+                    //$transMsg = $transMsg . "第三方云数据库一次解绑全部";
                 }
                 break;
+
+            case "CLICK_EMC_READ":
+                $wxDbObj = new class_mysql_db();
+                $db_info = $wxDbObj->db_BleBoundInfo_query($data->FromUserName);
+
+                if ($db_info == false)
+                {
+                    $transMsg = $this->send_custom_message( $data->ToUserName, 'text', "数据库中未绑定设备");
+                    //$transMsg = "数据库中未绑定设备";
+                }
+                else
+                {
+                    //只考虑一个设备的情况，未来再考虑同一个用户绑定多个设备的情况
+                    $dev_table = $db_info[0];
+                    //对辐射强度瞬时读取操作进行层三处理，构造可以发送给硬件设备的信息
+                    $wxL3Obj = new class_L3_Process_Func();
+                    $msg_body = $wxL3Obj->L3_deviceMsgProcess($data->EventKey, $dev_table, $data->FromUserName, $data->DeviceID);
+                    //BYTE系列化处理在L3消息处理过程中已完成
+                    //推送数据到硬件设备
+                    $result = $this->trans_msgtodevice($dev_table["deviceType"], $dev_table["deviceID"], $dev_table["openID"], $msg_body);
+                    //推送回复消息给微信界面
+                    $wxDbObj = new class_mysql_db();
+                    $wx_trace = $wxDbObj->db_LogSwitchInfo_inqury($data->FromUserName);
+                    if ($wx_trace ==1)
+                    {
+                        $str_body = unpack('H*',$msg_body);
+                        $transMsg = $this->send_custom_message($data->ToUserName,'text',
+                        "发送瞬时读取PUSH操作给DeviceID= " . $dev_table["deviceID"] ."\n Result= " .json_encode($result) . "\n Content= " . json_encode($str_body));
+                    }
+                }
+                break;
+
+            case "CLICK_TRACE_ON":
+                $trace_set = 1;
+                $wxDbObj = new class_mysql_db();
+                $transMsg = $wxDbObj->db_LogSwitchInfo_set($data->FromUserName,$trace_set);
+                break;
+
+            case "CLICK_TRACE_OFF":
+                $trace_set = 0;
+                $wxDbObj = new class_mysql_db();
+                $transMsg = $wxDbObj->db_LogSwitchInfo_set($data->FromUserName,$trace_set);
+                break;
+/*
             case "CLICK_LIGHT_INQ":
                 $transMsg = $this->xms_responseText($data->FromUserName, $data->ToUserName,"暂时未实现的操作，等待设备功能完善后实现");
                 break;
@@ -604,8 +685,10 @@ class class_wx_IOT_sdk
                         "已发送" . $open . "操作, DeviceID= " . $dev["deviceID"] . ", 设备消息= " . $dev1);
                 }
                 break;
+*/
             default:
                 $transMsg = $this->xms_responseText($data->FromUserName, $data->ToUserName,"收到未识别菜单EventKey值");
+                //$transMsg = "收到未识别菜单EventKey值";
                 break;
         }
         return $transMsg;
@@ -630,9 +713,6 @@ class class_wx_IOT_sdk
 
 }// End of class_wx_IOT_sdk
 
-
-
-
 //Layer 3 aperation
 //建立数据库的持久层功能
 class class_mysql_db
@@ -648,7 +728,7 @@ class class_mysql_db
             die('Could not connect: ' . mysqli_error($mysqli));
         }
         //找到数据库中已有序号最大的，也许会出现序号(6 BYTE)用满的情况，这时应该考虑更新该算法，短期内不需要考虑这么复杂的情况
-        $result = $mysqli->query("SELECT sid FROM `bleboundinfo` WHERE 1");
+        $result = $mysqli->query("SELECT `sid` FROM `bleboundinfo` WHERE 1");
         $sid =1;
         while($row = $result->fetch_array())
         {
@@ -809,8 +889,9 @@ class class_mysql_db
         return $result;
     }
 
-    //存储EMC数据
-    public function db_EmcData_save($time, $user, $deviceid, $value)
+    //存储EMC数据，每一次存储，都是新增一条记录
+    //时间的网格化是以3分钟为单位的，如果后期需要调整该定时，需要更新该函数
+    public function db_EmcDataInfo_save($user, $deviceid, $timestamp, $value, $gps)
     {
         //建立连接
         $mysqli=new mysqli(WX_DBHOST, WX_DBUSER, WX_DBPSW, WX_DBNAME, WX_DBPORT);
@@ -818,8 +899,237 @@ class class_mysql_db
         {
             die('Could not connect: ' . mysqli_error($mysqli));
         }
-        $result=$mysqli->query("INSERT INTO `emcdatainfo` (timeStamp, fromUserName, deviceID, emcValue)
-          VALUES ('$time', '$user', '$deviceid','$value')");
+        //找到数据库中已有序号最大的，也许会出现序号(6 BYTE)用满的情况，这时应该考虑更新该算法，短期内不需要考虑这么复杂的情况
+        $result = $mysqli->query("SELECT `sid` FROM `emcdatainfo` WHERE 1");
+        $sid =0;
+        while($row = $result->fetch_array())
+        {
+            if ($row['sid'] > $sid)
+            {
+                $sid = $row['sid'];
+            }
+        }
+        $sid = $sid+1;
+        //存储新记录，如果发现是已经存在的数据，则覆盖，否则新增
+        $date1 = intval(date("ymd", $timestamp));
+        $tmp = getdate($timestamp);
+        $hourminindex = intval(($tmp["hours"] * 60 + $tmp["minutes"])/3);  //固定三分钟为一个周期
+        $result = $mysqli->query("SELECT `sid` FROM `emcdatainfo` WHERE ((`wxuser` = '$user' AND `deviceid` =
+          '$deviceid') AND (`date` = '$date1' AND `hourminindex` = '$hourminindex'))");
+        if (($result->num_rows)>0)   //重复，则覆盖
+        {
+            $res1=$mysqli->query("UPDATE `emcdatainfo` SET `emcvalue` = '$value'
+              WHERE ((`wxuser` = '$user' AND `deviceid` = '$deviceid') AND (`date` = '$date1' AND `hourminindex` = '$hourminindex'))");
+            $res2=$mysqli->query("UPDATE `emcdatainfo` SET `gps` = '$gps'
+              WHERE ((`wxuser` = '$user' AND `deviceid` = '$deviceid') AND (`date` = '$date1' AND `hourminindex` = '$hourminindex'))");
+            $result = $res1 OR $res2;
+        }
+        else   //不存在，新增
+        {
+            $result=$mysqli->query("INSERT INTO `emcdatainfo` (sid, wxuser, deviceid, date, hourminindex, emcvalue, gps)
+          VALUES ('$sid', '$user', '$deviceid', '$date1', '$hourminindex','$value', '$gps')");
+        }
+        $mysqli->close();
+        return $result;
+    }
+
+    //删除对应用户所有超过90天的数据
+    //缺省做成90天，如果参数错误，导致90天以内的数据强行删除，则不被认可
+    public function db_EmcDataInfo_delete_3monold($user, $deviceid, $days)
+    {
+        if ($days <90) $days = 90;  //不允许删除90天以内的数据
+        //建立连接
+        $mysqli=new mysqli(WX_DBHOST, WX_DBUSER, WX_DBPSW, WX_DBNAME, WX_DBPORT);
+        if (!$mysqli)
+        {
+            die('Could not connect: ' . mysqli_error($mysqli));
+        }
+        //删除距离当前超过90天的数据，数据的第90天稍微有点截断，但问题不大
+        //比较蠢的细节方法
+        /*$result = $mysqli->query("SELECT `sid` FROM `emcdatainfo` WHERE `date` < (now()-$days)");
+        while($row = $result->fetch_array())
+        {
+            $sidtmp = $row['sid'];
+            $res = $mysqli->query("DELETE FROM `emcdatainfo` WHERE `sid` = '$sidtmp'");
+        }*/
+        //尝试使用一次性删除技巧，结果非常好!!!
+        $result = $mysqli->query("DELETE FROM `emcdatainfo` WHERE ((`wxuser` = '$user' AND `deviceid` =
+          '$deviceid') AND (TO_DAYS(NOW()) - TO_DAYS(`date`) > '$days'))");
+        $mysqli->close();
+        return $result;
+    }
+
+    //新增或者更新累计辐射剂量数据，每个用户一条记录，不得重复
+    public function db_EmcAccumulationInfo_save($user, $deviceid)
+    {
+        //建立连接
+        $mysqli = new mysqli(WX_DBHOST, WX_DBUSER, WX_DBPSW, WX_DBNAME, WX_DBPORT);
+        if (!$mysqli) {
+            die('Could not connect: ' . mysqli_error($mysqli));
+        }
+        $result = $mysqli->query("SELECT * FROM `emcaccumulationinfo` WHERE (`wxuser` = '$user' AND `deviceid` =
+          '$deviceid')");
+        $tag = 0;
+        if (($result->num_rows)>0)   //更新数据而已，而且假设每个用户只有唯一的一条记录
+        {
+            $row = $result->fetch_array();
+            $lastupdatedate = date("ymd", strtotime($row['lastupdatedate']));  //字符串
+            $lastUpdateStart = date("ymd", strtotime($row['lastupdatedate'])-2*24*60*60);  //解决模2的边界问题
+            if ($lastupdatedate != date("ymd")) {
+                $tag = 1;
+                $sid = $row['sid'];
+                $lastUpdateStart = intval($lastUpdateStart);
+            }
+        }else  //如果是第一次创建
+        {
+            //先找到最大的SID系列号
+            $res1 = $mysqli->query("SELECT `sid` FROM `emcaccumulationinfo` WHERE 1");
+            $sid = 0;
+            while ($row = $res1->fetch_array()) {
+                if ($row['sid'] > $sid) {
+                    $sid = $row['sid'];
+                }
+            }
+            $sid = $sid + 1;
+            //初始化各种数值
+            $lastupdatedate = intval(date("ymd"));
+            $avg30days = "0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0";  //使用;做数据之间的分割
+            $avg3month = "0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0";
+            $result = $mysqli->query("INSERT INTO `emcaccumulationinfo` (sid, wxuser, deviceid, lastupdatedate, avg30days, avg3month)
+          VALUES ('$sid', '$user', '$deviceid', '$lastupdatedate', '$avg30days', '$avg3month')");
+            $tag = 2;
+        }
+        if ($tag ==1 || $tag ==2)  //不同天的更新，或者新创时的全面计算
+        {
+            //从数据库中取出，进行处理
+            $result = $mysqli->query("SELECT * FROM `emcaccumulationinfo` WHERE (`sid` = '$sid')");
+            $row = $result->fetch_array();  //原则上只有唯一的一个记录
+            $avg30days = $row['avg30days'];
+            $avg3month = $row['avg3month'];
+            $avgd1 = explode(";", $avg30days);
+            $avgm1 = explode(";", $avg3month);
+            for ($i=0;$i<32;$i++)
+            {
+                $avgd2 [$i] = intval($avgd1[$i]);
+                $avgm2 [$i] = intval($avgm1[$i]);
+                $daynum [$i] = 0;
+                $monthnum [$i] = 0;
+            }
+            //全面做一次计算处理，先做当月的处理
+            $day0 = intval(date("ymd"));
+            if ($tag == 1) $day90 = $lastUpdateStart;  //两天的边界问题需要考虑在内
+            if ($tag == 2) $day90 = intval(date("ymd", time()-90*24*60*60));
+
+            $result = $mysqli->query("SELECT * FROM `emcdatainfo` WHERE (`wxuser` = '$user' AND `deviceid` = '$deviceid')");
+            while($row = $result->fetch_array())
+            {
+                $getdate0 = date("ymd", strtotime($row['date']));
+                $getdate = intval($getdate0);
+                if (($getdate <= $day0) &&  ($getdate >= $day90))
+                {
+                    $tm = intval(substr($getdate0,2,2));
+                    $td = intval(substr($getdate0,4,2));
+                    $index1 = $tm*31 + $td;
+                    $index = intval(($index1 - intval($index1/90)*90)/3);
+                    $value = intval($row['emcvalue']);
+                    //日加总
+                    if ($daynum[$td] == 0){
+                        $avgd2[$td] = $value;
+                    }else{
+                        $avgd2[$td] = $avgd2[$td] + $value;
+                    }
+                    $daynum[$td] = $daynum[$td] + 1;
+                    //季加总平均
+                    if ($monthnum[$index] == 0){
+                        $avgm2[$index] = $value;
+                    }else{
+                        $avgm2[$index] = $avgm2[$index] + $value;
+                    }
+                    $monthnum[$index] = $monthnum[$index] + 1;
+                }
+            }
+            for ($i=0;$i<32;$i++)
+            {
+                if ($daynum[$i] != 0)
+                $avgd2 [$i] = intval($avgd2[$i] / $daynum[$i]);
+                if ($monthnum[$i] != 0)
+                    $avgm2 [$i] = intval($avgm2[$i] / $monthnum[$i]);
+            }
+            $avg30days = implode(";", $avgd2);
+            $avg3month = implode(";", $avgm2);
+            //再重新存入数据文件
+            $res1=$mysqli->query("UPDATE `emcaccumulationinfo` SET `avg30days` = '$avg30days' WHERE (`sid` = '$sid')");
+            $res2=$mysqli->query("UPDATE `emcaccumulationinfo` SET `avg3month` = '$avg3month' WHERE (`sid` = '$sid')");
+            $res3=$mysqli->query("UPDATE `emcaccumulationinfo` SET `lastupdatedate` = '$day0' WHERE (`sid` = '$sid')");
+
+            $result = $res1 OR $res2 OR $res3;
+        }
+        $mysqli->close();
+        return $result;
+    }
+
+
+    //新增或者更新累计辐射剂量数据，每个用户一条记录，不得重复
+    //返回双结构数据：数组的第一个包含了31天的平均值，30个采样点，第二个包含了90天的平均值（每三天平均一次），30个点的采样数据
+    //数组是32个元素，DAY数据在1-31中，90天的均值数在0-29中
+    //这样设计只是为了处理的方便，上层使用时自行处理边界问题
+    public function db_EmcAccumulationInfo_inqury($user, $deviceid)
+    {
+        //建立连接
+        $mysqli = new mysqli(WX_DBHOST, WX_DBUSER, WX_DBPSW, WX_DBNAME, WX_DBPORT);
+        if (!$mysqli) {
+            die('Could not connect: ' . mysqli_error($mysqli));
+        }
+        $result = $mysqli->query("SELECT * FROM `emcaccumulationinfo` WHERE (`wxuser` = '$user' AND `deviceid` = '$deviceid')");
+        $row = $result->fetch_array();
+        $avgd = $row['avg30days'];
+        $avgm = $row['avg3month'];
+        $avgd1 = explode(";", $avgd);
+        $avgm1 = explode(";", $avgm);
+        for ($i=0;$i<32;$i++)
+        {
+            $avgd2 [$i] = intval($avgd1[$i]);
+            $avgm2 [$i] = intval($avgm1[$i]);
+        }
+        $result = array ("avg30days" => $avgd2,  "avg3month" => $avgm2);
+        $mysqli->close();
+        return $result;
+    }
+
+    //查询数据库中该用户微信log开关状态
+    public function db_LogSwitchInfo_inqury($user)
+    {
+        $mysqli = new mysqli(WX_DBHOST, WX_DBUSER, WX_DBPSW, WX_DBNAME, WX_DBPORT);
+        if (!$mysqli) {
+            die('Could not connect: ' . mysqli_error($mysqli));
+        }
+        $result = $mysqli->query("SELECT * FROM `logswitch` WHERE (`appid` = '$user')");
+        if ($result->num_rows>0)
+        {
+            $row = $result->fetch_array();
+            $result = $row['switch'];
+        }
+        $mysqli->close();
+        return $result;
+    }
+
+
+    //设置数据库中该用户微信log开关状态
+    public function db_LogSwitchInfo_set($user,$switch_set)
+    {
+        $mysqli = new mysqli(WX_DBHOST, WX_DBUSER, WX_DBPSW, WX_DBNAME, WX_DBPORT);
+        if (!$mysqli) {
+            die('Could not connect: ' . mysqli_error($mysqli));
+        }
+        //如果该用户存在则更新该用户微信log开关状态
+        $result=$mysqli->query("UPDATE `logswitch` SET `switch` = '$switch_set' WHERE (`appid` = '$user')");
+
+        //否则插入一条新记录
+        if (!$result)
+        {
+            $result=$mysqli->query("INSERT INTO `logswitch` (appid, switch) VALUES ('$user', '$switch_set')");
+
+        }
         $mysqli->close();
         return $result;
     }
@@ -880,11 +1190,8 @@ class class_L3_Process_Func
             case "unbind":
                 $respContent = $this->L3_unbind_process($content);
                 break;
-            case "CLICK_LIGHT_ON":
-                $respContent = $this->L3_light_on_process($content);
-                break;
-            case "CLICK_LIGHT_OFF":
-                $respContent = $this->L3_light_off_process($content);
+            case "CLICK_EMC_READ":
+                $respContent = $this->L3_emc_data_push_process();
                 break;
             default:
                 $respContent = "";
@@ -908,28 +1215,36 @@ class class_L3_Process_Func
     //DEVICE_TEXT processing
     public function L3_device_text_process($content, $fromuser, $deviceid)
     {
-        //反系列化处理
-        $rev = $this->L3_msgParse($content);
-        //进入不同数据内容处理阶段
+        //因为收到的数据消息头已经被微信处理掉，传递过来的消息体在上级函数中已经被处理成16制格式的字符串
+        //$rev = $this->L3_msgParse($content);
+
         $cmdid = "";
-        $resp = $rev["body"];
-        switch ($rev["head"]["head_cmdid"])
+
+        $L3_key = hexdec(substr($content, 0, 2)) & 0xFF;
+
+        switch ($L3_key)
         {
-            case "CMDID_EMC_DATA_REQ":
-                //取得数据结构体
-                $emc_value = hexdec(substr($rev["body"], 0, 4))  & 0xFFFF;
-                $emc_time = hexdec(substr($rev["body"], 0, 4))  & 0xFFFF;
+            case CMDID_EMC_DATA_REQ:
+                //定时辐射强度处理
+                $cmdid = CMDID_EMC_DATA_RESP;
+                //$resp = L3_emc_data_req_process($content,$fromuser,$deviceid);
+                $emc_value = hexdec(substr($content, 4, 4)) & 0xFFFF;
+                $emc_time = substr($content, 8, 12);
+                $gps = substr($content, 20, 12);
                 //存入数据库中
                 $wxDbObj = new class_mysql_db();
-                $wxDbObj->db_EmcData_save($emc_time, $fromuser, $deviceid, $emc_value);
-                $cmdid = CMDID_EMC_DATA_RESP;
-                $resp = "";
+                $wxDbObj->db_EmcDataInfo_save($fromuser, $deviceid, $emc_time, $emc_value, $gps); //GPS not yet exist today, could be add in future.
+                $wxDbObj->db_EmcDataInfo_delete_3monold($fromuser, $deviceid, 90);  //remove 90 days old data.
+                $wxDbObj->db_EmcAccumulationInfo_save($fromuser, $deviceid); //累计值计算，如果不是初次接收数据，而且日期没有改变，则该过程将非常快
+
+                $body_manufacture = "1800";
+                $resp = $body_manufacture;
                 break;
-            case "CMDID_EMC_DATA_REV":
+            case CMDID_EMC_DATA_REV:
                 //不需要再回复消息，再考虑设计下这个工作流程设计
                 $cmdid = CMDID_SEND_TEXT_RESP;
                 break;
-            case "CMDID_OCH_DATA_REQ":
+            case CMDID_OCH_DATA_REQ:
                 $cmdid = CMDID_OCH_DATA_RESP;
                 break;
             default:
@@ -937,33 +1252,68 @@ class class_L3_Process_Func
                 break;
         }
         //再进入真正的处理阶段, 系列化
-        $result = $this->L3_msgBuild($cmdid, $resp, $rev["head"]["head_seq"]);
+        $result = $this->L3_msgBuild($cmdid, $resp, 0); //sequence = 0
         return $result;
     }
 
-    public function L3_light_on_process($content)
+    //定时辐射强度报告 （IHU -> Cloud)
+    public function L3_emc_data_req_process($body,$fromuser,$deviceid)
     {
-        $result = $this->L3_msgBuild(CMDID_OPEN_LIGHT_PUSH, null, 0);
-        return $result;
+        $emc_value = hexdec(substr($body, 4, 4)) & 0xFFFF;
+        $emc_time = substr($body, 8, 12);
+        $gps = substr($body, 20, 12);
+        //存入数据库中
+        $wxDbObj = new class_mysql_db();
+        $wxDbObj->db_EmcDataInfo_save($fromuser, $deviceid, $emc_time, $emc_value, $gps); //GPS not yet exist today, could be add in future.
+        $wxDbObj->db_EmcDataInfo_delete_3monold($fromuser, $deviceid, 90);  //remove 90 days old data.
+        $wxDbObj->db_EmcAccumulationInfo_save($fromuser, $deviceid); //累计值计算，如果不是初次接收数据，而且日期没有改变，则该过程将非常快
+
+        $body_manufacture = "1800";
+        $resp = $body_manufacture;
+        return $resp;
+
     }
 
-    public function L3_light_off_process($content)
+    //瞬时辐射强度读取 (Cloud- > IHU)
+    public function L3_emc_data_push_process()
     {
-        $result = $this->L3_msgBuild(CMDID_CLOSE_LIGHT_PUSH, null, 0);
+
+        $body_ctrl = "20";
+        $body_manufacture = "001800";
+        $msg_body = $body_ctrl . $body_manufacture;
+
+        $hex_body = pack('H*',$msg_body);
+
+        return $hex_body;
+    }
+
+
+    //定时辐射强度回应(Cloud->IHU)
+    public function L3_emc_data_resp_process()
+    {
+        $head_seq = 0x1237;
+        $body_resp = "0A020800";
+        $body_data = "1200";
+        $body_manufacture = "1800";
+
+        $msg_body = $body_resp . $body_data . $body_manufacture;
+
+        $result = $this->L3_msgBuild(CMDID_EMC_DATA_RESP, $msg_body, $head_seq);
         return $result;
     }
 
     //L3消息解析，完成BYTE到消息结构体的解析
     public function L3_msgParse($input)
     {
-        $buf["head_magic"] = hexdec(substr($input, 0, 4)) & 0xFFFF;
-        if ($buf["head_magic"] != L3_MAGIC_BL) return false;
-        $buf["head_version"] = hexdec(substr($input, 4, 4))  & 0xFFFF;
-        $buf["head_length"] = hexdec(substr($input, 8, 4))  & 0xFFFF;
-        $buf["head_cmdid"] = hexdec(substr($input, 12, 4))  & 0xFFFF;
-        $buf["head_seq"] = hexdec(substr($input, 16, 4))  & 0xFFFF;
-        $buf["head_errorcode"] = hexdec(substr($input, 20, 4))  & 0xFFFF;
-        $content = substr($input, 24);
+        $input = unpack('H*', $input);
+        $buf["head_magic"] = hexdec(substr($input, 0, 2)) & 0xFF;
+        if ($buf["head_magic"] != L3_HEAD_MAGIC) return false;
+        $buf["head_version"] = hexdec(substr($input, 2, 2))  & 0xFF;
+        $buf["head_length"] = hexdec(substr($input, 4, 4))  & 0xFFFF;
+        $buf["head_cmdid"] = hexdec(substr($input, 8, 4))  & 0xFFFF;
+        $buf["head_seq"] = hexdec(substr($input, 12, 4))  & 0xFFFF;
+
+        $content = substr($input, 16);
         $result = array("head" => $buf, "body" => $content);
         return $result;
     }
@@ -971,13 +1321,13 @@ class class_L3_Process_Func
     //L3消息格式构造，而且直接完成消息体到二进制流的转化
     public function L3_msgBuild($cmdid, $resp, $seq)
     {
-        $magic = $this->ushort2string(L3_MAGIC_BL);
-        $version = $this->ushort2string(1);
-        $length = $this->ushort2string(L3_HEAD_LENGTH + strlen($resp));
+        $magic = $this->byte2string(L3_HEAD_MAGIC);
+        $version = $this->byte2string(L3_HEAD_VERSION);
+        $length = $this->ushort2string(L3_HEAD_LENGTH + strlen($resp)/2);
         $cmdid = $this->ushort2string($cmdid);
         $seq = $this->ushort2string($seq);
-        $errorcode = $this->ushort2string(0);
-        $output = $magic . $version . $length . $cmdid . $seq . $errorcode . $resp;;
+
+        $output = pack('H*', $magic . $version . $length . $cmdid . $seq . $resp);
         return $output;
     }
 

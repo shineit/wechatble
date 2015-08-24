@@ -43,6 +43,7 @@
  */
 
 include_once "wx_iot.class.php";
+
 //Layer 2.1.1 SDK01.1，完整的公号SDK，正在跟轻量级SDK01进行合并
 class class_wechat_sdk
 {
@@ -4130,15 +4131,16 @@ class class_wechat_sdk
     public function responseMsg()
     {
         $postStr = $GLOBALS["HTTP_RAW_POST_DATA"];
-        if (!empty($postStr)){
+        if (!empty($postStr))
+        {
             $this->logger("R ".$postStr);
 
             //增加了一些测试处理，以便尽快返回一点内容
             libxml_disable_entity_loader(true);  //prevent XML entity injection
             $postObj = simplexml_load_string($postStr, 'SimpleXMLElement');  //防止破坏CDATA的内容，进而影响智能硬件L3消息体
             //$postObj = simplexml_load_string($postStr, 'SimpleXMLElement', LIBXML_NOCDATA);
-            $fromUsername = $postObj->FromUserName;
-            $toUsername = $postObj->ToUserName;
+            $fromUsername = trim($postObj->FromUserName);
+            $toUsername = trim($postObj->ToUserName);
             $keywords = trim($postObj->Content);
             $time = time();
             $textTpl = "<xml>
@@ -4148,12 +4150,23 @@ class class_wechat_sdk
                     <MsgType><![CDATA[%s]]></MsgType>
                     <Content><![CDATA[%s]]></Content>
                     <FuncFlag>0</FuncFlag></xml>";
+
             if(!empty($keywords))
             {
-                $msgType = "text";
-                $contentStr = "亲，八仙下海欢迎您，有什么可以帮您的？";
-                $resultStr = sprintf($textTpl, $fromUsername, $toUsername, $time, $contentStr);
-                echo $resultStr;
+                //if ($wx_trace ==1)
+                {
+                    $contentStr = "Content= " . $keywords;
+                    //由于这里是收到信息的入口，而且微信每次收到消息的反应最多只能ECHO一次，故而这儿不能使用ECHO，以免影响后续业务逻辑的执行
+                    //这里的正解是使用CUSTOM_MESSAGE，使得客服人员可以确认收到的内容，但是，客服接口非常影响整个程序的执行效率
+                    //第一种方式：ECHO
+                    //$resultStr = sprintf($textTpl, $fromUsername, $toUsername, $time, $msgType, $contentStr);
+                    //echo $resultStr;
+                    //第二种方式：客服接口，
+                    $wxDevObj = new class_wx_IOT_sdk($this->appid, $this->appsecret);
+                    $result = $wxDevObj->send_custom_message($fromUsername, 'text', $contentStr."\nType=".$postObj->MsgType);  //使用API-CURL推送客服微信用户
+                    //最终都应该关掉，以提高程序的执行效率
+                }
+
             }else{
                 echo "";
             }
@@ -4194,7 +4207,9 @@ class class_wechat_sdk
             }
             $this->logger("T ".$result);
             echo $result;
-        }else {
+        }
+        else
+        {
             echo "";
             exit;
         }
@@ -4209,7 +4224,7 @@ class class_wechat_sdk
         switch ($object->Event)
         {
             case "subscribe":
-                $content = "欢迎关注八仙下海-智能硬件测试";
+                $content = "欢迎关注小趣科技-智能硬件测试";
                 $content .= (!empty($object->EventKey))?("\n来自二维码场景 ".str_replace("qrscene_","",$object->EventKey)):"";
                 break;
             case "unsubscribe":
@@ -4229,7 +4244,7 @@ class class_wechat_sdk
                     default:    //转到智能硬件菜单部分，这里的结构保持完整性
                         $click = 2;
                         $wxDevObj = new class_wx_IOT_sdk($this->appid, $this->appsecret);
-                        $result = $wxDevObj->receive_deviceClickCommand($object);
+                        $content = $wxDevObj->receive_deviceClickCommand($object);
                         //$content = "点击菜单：".$object->EventKey;
                         break;
                 }
@@ -4247,16 +4262,23 @@ class class_wechat_sdk
                 $content = "receive a new event: ".$object->Event;
                 break;
         }
-        if (($click ==0) || ($click == 1)){
-            if(is_array($content)){
-                if (isset($content[0])){
+        if (($click ==0) || ($click == 1))
+        {
+            if (is_array($content)) {
+                if (isset($content[0])) {
                     $result = $this->transmitNews($object, $content);
-                }else if (isset($content['MusicUrl'])){
+                } else if (isset($content['MusicUrl'])) {
                     $result = $this->transmitMusic($object, $content);
                 }
-            }else{
+            }
+            else
+            {
                 $result = $this->transmitText($object, $content);
             }
+        }
+        else if ($click == 2)
+        {
+            $result = $content;
         }
         return $result;
     }
@@ -4286,7 +4308,7 @@ class class_wechat_sdk
                 $content = array();
                 $content = array("Title"=>"最炫民族风", "Description"=>"歌手：凤凰传奇", "MusicUrl"=>"http://121.199.4.61/music/zxmzf.mp3", "HQMusicUrl"=>"http://121.199.4.61/music/zxmzf.mp3");
             }else{
-                $content = date("Y-m-d H:i:s",time())." FromUserName: ".$object->FromUserName."\n技术支持-八仙下海智能硬件";
+                $content = date("Y-m-d H:i:s",time())." FromUserName: ".$object->FromUserName."\n技术支持-小趣智能硬件";
             }
 
             if(is_array($content)){
@@ -4507,6 +4529,24 @@ class class_wechat_sdk
             if(file_exists($log_filename) and (abs(filesize($log_filename)) > $max_size)){unlink($log_filename);}
             file_put_contents($log_filename, date('H:i:s')." ".$log_content."\r\n", FILE_APPEND);
         }
+        //存储在数据库中
+        //建立连接
+        $mysqli=new mysqli(WX_DBHOST, WX_DBUSER, WX_DBPSW, WX_DBNAME, WX_DBPORT);
+        if (!$mysqli)
+        {
+            die('Could not connect: ' . mysqli_error($mysqli));
+        }
+        //数据库SID=0的记录，存储
+        $result = $mysqli->query("SELECT * FROM `loginfo` WHERE `sid` = '0'");
+        $row = $result->fetch_array();
+        $sid = intval($row['logdata']); //记录中存储着最大的SID
+        //存储新记录
+        $result=$mysqli->query("INSERT INTO `loginfo` (sid, logdata) VALUES ('$sid', '$log_content')");
+        //更新sid
+        $sid = $sid + 1;
+        $result=$mysqli->query("UPDATE `loginfo` SET `logdata` = '$sid' WHERE (`sid` = '0')");
+        $mysqli->close();
+
     }
 
 } //end of Class class_wechat_sdk

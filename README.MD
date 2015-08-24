@@ -1,6 +1,7 @@
 BXXH项目文件说明
 ==============
 Make By：ZJL
+2015/08/13 Updare By：LZH
 
 ##说明 
 **这里的文档可以让你更好的了解`bxxh`项目，更好的使用。 **
@@ -12,25 +13,40 @@ Make By：ZJL
 
 
 ###文件内容说明：
-1. config.php，定义项目所用到的全局参数
-2. wechat.class.php，基础公号的SDK
-3. wx_iot.class.php，硬件设备公号的SDK
-4. errCode.pho，辅助wechat.class，成为其SDK的一部分
-5. index.php，欢迎进入页面，后台工具的入口程序
-6. phoqrcode目录，第三方二维码插件，完全不依赖外界的独立php插件
-7. qrcode.png，二维码生成临时图像文件
-8. cloud_callback.php，做为第三方云的后台入口
-9. tool.php，后台配置管理工具的入口
-10. DbTest.php，测试程序
-11. Typical.zip，上传SAE云的临时打包文件
-12. README.MD，本文件
-13. 部署前，动态导出本项目MySql/bxxh的*.sql文件，并导入到第三方云上
-14. tool.php，测试工具角色，可以写测试脚本，进行在线测试
-15. tool.create.menu.php，后台强制创建菜单
-16. tool.qrcode.gen.php，受控index.php页面的二维码自动生成程序
-17. tool.dev.bind.php，后台强制绑定用户
-18. tool.pageshare.php，测试页面共享以及JSSDK功能
-19. wx_jssdk.php，JSSDK类封装
+<根目录下>
+1. cloud_callback.php，做为第三方云的后台入口
+2. index.php，欢迎进入页面，后台工具的入口程序
+3. README.MD，本文件
+
+\config
+4. config.php，定义项目所用到的全局参数
+5. errCode.pho，辅助wechat.class，成为其SDK的一部分
+
+\database
+6. db.class.php, 定于数据库操作相关的API
+
+\oam
+  \sdk_qrcode  二位码图片生成SDK
+7. app_mfuncard.sql, 数据库文件，部署前，动态导出本sql文件，并导入到第三方云上
+8. DbTest.php，database临时测试程序
+9. qrcode.png，二维码生成临时图像文件
+10. tool.ajxhisdata.php 用于被tool.pageshare.php调用的后台历史数据访问php程序
+11. tool.dev.bind.php，后台强制绑定用户
+12. tool.pageshare.php，测试页面共享以及JSSDK功能
+13. tool.php，测试工具角色，可以写测试脚本，进行在线测试
+14. tool.qrcode.gen.php，受控index.php页面的二维码自动生成程序
+
+\sdk
+15. wechat.class.php，基础公号的SDK
+16. wx_jssdk.php，JSSDK类封装
+
+\service
+17. l3_msg.class.php, device和微信云之间层3交互消息处理
+18. wx_iot.class.php，硬件设备微信公众号处理
+
+\wechat
+19. tool.create.menu.php，后台强制创建菜单
+20. user.interface.php, 用户辐射数据显示界面 
 
 
 ###SAE运行或部署步骤：

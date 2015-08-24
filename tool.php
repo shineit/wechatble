@@ -24,7 +24,7 @@ include_once "config.php";
 include_once "wechat.class.php";
 header("Content-type:text/html;charset=utf-8");
 //如果运行在本地，以下地址存放二维码图片
-static $imagePath = "D:/work/image/";
+static $imagePath = dirname(__File__);
 
 $wx_options = array(
     'token'=>WX_TOKEN, //填写你设定的key
@@ -37,6 +37,8 @@ $wx_options = array(
 $wxObj = new class_wechat_sdk($wx_options);
 echo "<br><H2>微信硬件工作环境即将开始......<br></H2>";
 $wxDevObj = new class_wx_IOT_sdk(WX_APPID, WX_APPSECRET);
+
+
 
 
 /* 暂时不需要的功能，已经分解到不同的功能组件，放入后台管理工具之中了

@@ -12,6 +12,7 @@
  **/
 include_once "config.php";
 include_once "wechat.class.php";
+
 header("Content-type:text/html;charset=utf-8");
 
 $wx_options = array(
@@ -32,20 +33,29 @@ $wxObj = new class_wx_IOT_sdk(WX_APPID, WX_APPSECRET);
 echo "<br>测试最新刷新的Token=<br>"."$wxObj->access_token"."<br>";
 
 //Step2:测试创建微信界面上自定义的菜单
-static $self_create_menu = '{"button":[{"name":"绑操",
-            "sub_button":[{"type":"click","name":"绑定","key":"CLICK_BIND"},
-                            {"type":"click","name":"解绑","key":"CLICK_UNBIND"},
-                            {"type":"click","name":"查询","key":"CLICK_BIND_INQ"}]},
-    {"name":"开关",
-            "sub_button":[{"type":"click","name":"开灯","key":"CLICK_LIGHT_ON"},
-                            {"type":"click","name":"关灯","key":"CLICK_LIGHT_OFF"},
-                            {"type":"click","name":"查询","key":"CLICK_LIGHT_INQ"}]},
-    {"name":"测试",
-            "sub_button":[{"type":"click","name":"关于","key":"CLICK_ABOUT"},
-                            {"type":"click","name":"技术","key":"CLICK_TECH"},
-                            {"type":"click","name":"测试","key":"CLICK_TEST"},
-                            {"type":"view","name":"页面分享测试","url":"http://smdzjl.sinaapp.com/tool.pageshare.php"}]}
-    ]}';
+static $self_create_menu =
+    '{"button":[
+                {"name":"辐射测量",
+                    "sub_button":[{"type":"click","name":"瞬时读取","key":"CLICK_EMC_READ"},
+                                  {"type":"click","name":"Trace开","key":"CLICK_TRACE_ON"},
+                                  {"type":"click","name":"Trace关","key":"CLICK_TRACE_OFF"}]
+                },
+
+                {"name":"我要",
+                     "sub_button":[{"type":"click","name":"绑定","key":"CLICK_BIND"},
+                                   {"type":"click","name":"解绑","key":"CLICK_UNBIND"},
+                                   {"type":"click","name":"查询","key":"CLICK_BIND_INQ"}]
+                },
+
+                {"name":"更多信息",
+                    "sub_button":[{"type":"click","name":"关于","key":"CLICK_ABOUT"},
+                                  {"type":"click","name":"技术","key":"CLICK_TECH"},
+                                  {"type":"click","name":"测试","key":"CLICK_TEST"},
+                                  {"type":"view","name":"页面分享测试","url":"http://smdzjl.sinaapp.com/tool.pageshare.php"}]
+                }
+               ]
+    }';
+
 echo "<br>自定义菜单创建（先删再建-微信界面需要24小时更新，重新关注可立即刷新） <br>";
 var_dump($wxObj->delete_menu());
 var_dump($wxObj->create_menu($self_create_menu));
